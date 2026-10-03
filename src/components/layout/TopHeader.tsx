@@ -1,12 +1,29 @@
-import React, { useState } from 'react';
+import React, {
+  useEffect,
+  useRef,
+  useState,
+} from 'react';
+
+import {
+  Brain,
+  Upload,
+  Play,
+  User,
+  UserCircle,
+  ShieldCheck,
+  LogOut,
+  ChevronDown,
+  FileText,
+} from 'lucide-react';
+
 import { useNeuro } from '../../context/NeuroContext';
-import { Settings, User, ChevronDown, Check, Activity, FileSpreadsheet, Upload, Play } from 'lucide-react';
+
+const API = 'http://localhost:3000';
 
 export const TopHeader: React.FC = () => {
   const {
     subject,
     recording,
-    session,
     subjects,
     recordings,
     setSubject,
@@ -18,186 +35,421 @@ export const TopHeader: React.FC = () => {
     isProcessing,
   } = useNeuro();
 
-  const [dropdownOpen, setDropdownOpen] = useState(false);
+  const [
+    profileOpen,
+    setProfileOpen,
+  ] = useState(false);
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      setUploadedFile(file);
+  const [
+    userName,
+    setUserName,
+  ] = useState('NeuroAgent User');
+
+  const [
+    userEmail,
+    setUserEmail,
+  ] = useState('');
+
+  const profileRef =
+    useRef<HTMLDivElement>(null);
+
+  // ======================================================
+  // GET LOGGED-IN USER
+  // ======================================================
+
+  useEffect(() => {
+    const loadProfile = async () => {
+      try {
+        const response =
+          await fetch(
+            `${API}/api/auth/status`,
+            {
+              method: 'GET',
+              credentials: 'include',
+            }
+          );
+
+        if (!response.ok) {
+          return;
+        }
+
+        const result =
+          await response.json();
+
+        if (
+          result.authenticated
+        ) {
+          setUserName(
+            result.name ||
+              'NeuroAgent User'
+          );
+
+          setUserEmail(
+            result.email || ''
+          );
+        }
+      } catch (error) {
+        console.error(
+          'Failed to load user profile:',
+          error
+        );
+      }
+    };
+
+    loadProfile();
+  }, []);
+
+  // ======================================================
+  // CLOSE PROFILE WHEN CLICKING OUTSIDE
+  // ======================================================
+
+  useEffect(() => {
+    const handleClickOutside = (
+      event: MouseEvent
+    ) => {
+      if (
+        profileRef.current &&
+        !profileRef.current.contains(
+          event.target as Node
+        )
+      ) {
+        setProfileOpen(false);
+      }
+    };
+
+    document.addEventListener(
+      'mousedown',
+      handleClickOutside
+    );
+
+    return () => {
+      document.removeEventListener(
+        'mousedown',
+        handleClickOutside
+      );
+    };
+  }, []);
+
+  // ======================================================
+  // FILE UPLOAD
+  // ======================================================
+
+  const handleFileChange = (
+    event: React.ChangeEvent<HTMLInputElement>
+  ) => {
+    const file =
+      event.target.files?.[0];
+
+    if (!file) {
+      return;
     }
+
+    if (
+      !file.name
+        .toLowerCase()
+        .endsWith('.edf')
+    ) {
+      alert(
+        'Please select an EEG .edf file.'
+      );
+
+      event.target.value = '';
+      return;
+    }
+
+    setUploadedFile(file);
   };
 
+  // ======================================================
+  // RUN ANALYSIS
+  // ======================================================
+
+  const handleRunAnalysis =
+    async () => {
+      if (!uploadedFile) {
+        alert(
+          'Please upload an EEG .edf file first.'
+        );
+        return;
+      }
+
+      await runAnalysis(
+        uploadedFile
+      );
+    };
+
+  // ======================================================
+  // LOGOUT
+  // ======================================================
+
+  const handleLogout =
+    async () => {
+      try {
+        await fetch(
+          `${API}/api/auth/logout`,
+          {
+            method: 'POST',
+            credentials: 'include',
+          }
+        );
+      } catch (error) {
+        console.error(
+          'Logout error:',
+          error
+        );
+      } finally {
+        window.location.href = '/';
+      }
+    };
+
   return (
-    <header className="h-16 px-5 border-b border-cyan-500/20 bg-[#070e1c]/80 backdrop-blur-xl flex items-center justify-between select-none z-50 sticky top-0">
-      {/* LEFT: Brand Logo & Title */}
-      <div className="flex items-center gap-3">
-        <div className="relative flex items-center justify-center w-10 h-10 rounded-xl bg-cyan-950/40 border border-cyan-500/40 shadow-glow-cyan-sm">
-          <svg className="w-6 h-6 text-cyan-400 animate-pulse" viewBox="0 0 36 36" fill="none">
-            <circle cx="18" cy="18" r="16" stroke="currentColor" strokeWidth="1.2" strokeOpacity="0.4" />
-            <circle cx="18" cy="8" r="2.5" fill="#00d4ff" />
-            <circle cx="8" cy="22" r="2.5" fill="#00f5a0" />
-            <circle cx="28" cy="22" r="2.5" fill="#b057f5" />
-            <circle cx="18" cy="28" r="2" fill="#00d4ff" />
-            <line x1="18" y1="8" x2="8" y2="22" stroke="#00d4ff" strokeWidth="1.2" strokeOpacity="0.6" />
-            <line x1="18" y1="8" x2="28" y2="22" stroke="#00d4ff" strokeWidth="1.2" strokeOpacity="0.6" />
-            <line x1="8" y1="22" x2="28" y2="22" stroke="#00f5a0" strokeWidth="1" strokeOpacity="0.5" />
-            <line x1="8" y1="22" x2="18" y2="28" stroke="#00f5a0" strokeWidth="1" strokeOpacity="0.5" />
-            <line x1="28" y1="22" x2="18" y2="28" stroke="#b057f5" strokeWidth="1" strokeOpacity="0.5" />
-            <circle cx="18" cy="18" r="3" fill="#00d4ff" fillOpacity="0.8" />
-          </svg>
-          <div className="absolute inset-0 rounded-xl bg-cyan-400/10 blur-sm pointer-events-none" />
+    <header className="relative z-50 h-16 flex-shrink-0 bg-[#080d18] border-b border-white/10 px-4 flex items-center">
+
+      {/* ==================================================
+          LEFT - BRAND
+          ================================================== */}
+
+      <div className="flex items-center gap-3 min-w-[210px]">
+        <div className="w-9 h-9 rounded-xl bg-cyan-950/70 border border-cyan-400/30 flex items-center justify-center shadow-[0_0_20px_rgba(34,211,238,0.08)]">
+          <Brain className="w-5 h-5 text-cyan-300" />
         </div>
 
         <div>
-          <div className="flex items-center gap-2">
-            <h1 className="text-lg font-bold tracking-wider text-white font-display">
-              NEURO<span className="text-cyan-400">AGENT</span>
-            </h1>
+          <div className="text-sm font-bold tracking-wide text-white">
+            NeuroAgent
           </div>
-          <div className="text-[9.5px] font-semibold tracking-widest text-cyan-400/80 uppercase">
-            AI-Powered EEG Artifact Removal
+
+          <div className="text-[9px] text-cyan-400/70 uppercase tracking-[0.18em]">
+            EEG Intelligence
           </div>
         </div>
       </div>
 
-      {/* CENTER: File Selector, Upload, RUN ANALYSIS & Live Metadata */}
-      <div className="flex items-center gap-4">
-        {/* File selector pill */}
-        <div className="relative">
-          <button
-            onClick={() => setDropdownOpen(!dropdownOpen)}
-            className="flex items-center gap-2.5 px-3 py-1.5 rounded-lg bg-[#0b1628] border border-cyan-500/30 hover:border-cyan-400 text-xs font-mono text-cyan-200 shadow-panel hover:bg-[#0f1f3a] transition-all cursor-pointer"
-          >
-            <FileSpreadsheet className="w-3.5 h-3.5 text-cyan-400" />
-            <span>{uploadedFileName || session?.recording || `${subject}${recording}.edf`}</span>
-            <ChevronDown className={`w-3.5 h-3.5 text-cyan-400/80 transition-transform ${dropdownOpen ? 'rotate-180' : ''}`} />
-          </button>
+      {/* ==================================================
+          CENTER - EEG CONTROLS
+          ================================================== */}
 
-          {dropdownOpen && (
-            <div className="absolute left-0 mt-2 w-64 p-2 rounded-xl bg-[#091322] border border-cyan-500/30 shadow-2xl backdrop-blur-2xl z-50 animate-in fade-in zoom-in-95 duration-100">
-              <div className="text-[11px] font-bold text-gray-400 uppercase tracking-wider px-2 py-1">
-                Select Subject
-              </div>
-              <div className="max-h-40 overflow-y-auto space-y-1 mb-2">
-                {subjects.map(s => (
-                  <button
-                    key={s}
-                    onClick={() => { setSubject(s); }}
-                    className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-xs font-mono text-left transition-all ${
-                      s === subject ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40' : 'text-gray-300 hover:bg-white/5'
-                    }`}
-                  >
-                    <span>Subject: {s}</span>
-                    {s === subject && <Check className="w-3.5 h-3.5 text-cyan-400" />}
-                  </button>
-                ))}
-              </div>
+      <div className="flex-1 flex items-center justify-center gap-2">
 
-              <div className="text-[11px] font-bold text-gray-400 uppercase tracking-wider px-2 py-1 border-t border-cyan-500/20 pt-2">
-                Recording Run
-              </div>
-              <div className="flex gap-1.5 p-1">
-                {recordings.map(r => (
-                  <button
-                    key={r}
-                    onClick={() => { setRecording(r); setDropdownOpen(false); }}
-                    className={`flex-1 py-1 rounded text-xs font-mono text-center transition-all ${
-                      r === recording ? 'bg-cyan-500 text-black font-bold shadow-glow-cyan-sm' : 'bg-white/5 text-gray-300 hover:bg-white/10'
-                    }`}
-                  >
-                    {r}
-                  </button>
-                ))}
-              </div>
-            </div>
+        {/* Subject */}
+        <select
+          value={subject}
+          onChange={e =>
+            setSubject(e.target.value)
+          }
+          className="h-9 px-3 rounded-lg bg-white/[0.04] border border-white/10 text-xs text-gray-200 outline-none focus:border-cyan-400/40"
+          title="Subject"
+        >
+          {subjects?.map(
+            item => (
+              <option
+                key={item}
+                value={item}
+                className="bg-[#0a101d]"
+              >
+                {item}
+              </option>
+            )
           )}
-        </div>
+        </select>
 
-        {/* 1. Upload EEG Button */}
-        <label className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-[#0b1628] hover:bg-[#0f1f3a] border border-cyan-500/30 hover:border-cyan-400 text-xs font-mono text-cyan-200 shadow-panel transition-all cursor-pointer">
-          <Upload className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
-          <span className="max-w-[120px] truncate" title={uploadedFileName || 'Upload EEG'}>
-            {uploadedFileName || 'Upload EEG'}
+        {/* Recording */}
+        <select
+          value={recording}
+          onChange={e =>
+            setRecording(
+              e.target.value
+            )
+          }
+          className="h-9 px-3 rounded-lg bg-white/[0.04] border border-white/10 text-xs text-gray-200 outline-none focus:border-cyan-400/40"
+          title="Recording"
+        >
+          {recordings?.map(
+            item => (
+              <option
+                key={item}
+                value={item}
+                className="bg-[#0a101d]"
+              >
+                {item}
+              </option>
+            )
+          )}
+        </select>
+
+        {/* File upload */}
+        <label className="h-9 px-3 rounded-lg bg-white/[0.04] border border-white/10 hover:bg-white/[0.07] hover:border-cyan-400/30 text-xs text-gray-300 flex items-center gap-2 cursor-pointer transition-all">
+          <Upload className="w-3.5 h-3.5 text-cyan-400" />
+
+          <span className="max-w-[150px] truncate">
+            {uploadedFileName ||
+              'Upload EEG'}
           </span>
+
           <input
             type="file"
             accept=".edf"
+            onChange={
+              handleFileChange
+            }
             className="hidden"
-            onChange={handleFileChange}
           />
         </label>
 
-        {/* 2. RUN ANALYSIS Button */}
+        {/* Run analysis */}
         <button
-          onClick={() => runAnalysis()}
+          type="button"
+          onClick={
+            handleRunAnalysis
+          }
           disabled={isProcessing}
-          className={`flex items-center gap-2 px-3.5 py-1.5 rounded-lg font-mono text-xs font-extrabold uppercase tracking-wider transition-all cursor-pointer shadow-glow-cyan-sm active:scale-95 ${
-            isProcessing
-              ? 'bg-cyan-600/50 text-cyan-200 border border-cyan-400/40 cursor-wait opacity-80'
-              : 'bg-gradient-to-r from-cyan-500 to-emerald-400 hover:from-cyan-400 hover:to-emerald-300 text-black'
-          }`}
-          title="Run EEG Analysis Pipeline"
+          className="h-9 px-4 rounded-lg bg-cyan-500 hover:bg-cyan-400 disabled:opacity-50 disabled:cursor-not-allowed text-[#031018] text-xs font-semibold flex items-center gap-2 transition-all"
         >
-          <Play className={`w-3.5 h-3.5 fill-current shrink-0 ${isProcessing ? 'animate-spin' : ''}`} />
-          <span>{isProcessing ? 'PROCESSING...' : 'RUN ANALYSIS'}</span>
+          {isProcessing ? (
+            <>
+              <span className="w-3.5 h-3.5 border-2 border-[#031018]/30 border-t-[#031018] rounded-full animate-spin" />
+              Processing
+            </>
+          ) : (
+            <>
+              <Play className="w-3.5 h-3.5 fill-current" />
+              Run Analysis
+            </>
+          )}
         </button>
-
-        {/* Vertical divider */}
-        <div className="h-6 w-px bg-cyan-500/20" />
-
-        {/* 3. Live Metadata chips */}
-        <div className="flex items-center gap-4 text-xs">
-          <div>
-            <div className="text-[10px] text-gray-400 uppercase font-medium">Sampling Rate</div>
-            <div className="font-mono font-bold text-white tracking-wide">
-              {session?.sampling_rate != null ? session.sampling_rate : 160} <span className="text-cyan-400 text-[11px]">Hz</span>
-            </div>
-          </div>
-
-          <div>
-            <div className="text-[10px] text-gray-400 uppercase font-medium">Duration</div>
-            <div className="font-mono font-bold text-white tracking-wide">
-              {session?.duration != null ? session.duration.toFixed(2) : '60.99'} <span className="text-cyan-400 text-[11px]">s</span>
-            </div>
-          </div>
-
-          <div>
-            <div className="text-[10px] text-gray-400 uppercase font-medium">Channels</div>
-            <div className="font-mono font-bold text-white tracking-wide">
-              {session?.channels != null ? session.channels : 64}
-            </div>
-          </div>
-
-          <div>
-            <div className="text-[10px] text-gray-400 uppercase font-medium">ICA Components</div>
-            <div className="font-mono font-bold text-white tracking-wide text-cyan-300">
-              {session?.ica_components != null ? session.ica_components : 63}
-            </div>
-          </div>
-        </div>
       </div>
 
-      {/* RIGHT: System Online & Actions */}
-      <div className="flex items-center gap-3">
-        {/* Status Pill */}
-        <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-emerald-950/40 border border-emerald-500/40 text-emerald-400 text-xs font-medium">
-          <span className="w-2 h-2 rounded-full bg-emerald-400 pulse-online" />
-          <span className="tracking-wide">System Online</span>
+      {/* ==================================================
+          RIGHT
+          ================================================== */}
+
+      <div className="flex items-center gap-3 min-w-[250px] justify-end">
+
+        {/* File/session indicator */}
+        <div className="hidden xl:flex items-center gap-2 text-[10px] text-gray-500">
+          <FileText className="w-3.5 h-3.5" />
+
+          <span>
+            {uploadedFileName
+              ? uploadedFileName
+              : `${subject}${recording}`}
+          </span>
         </div>
 
-        {/* Settings button */}
-        <button
-          className="p-2 rounded-lg bg-white/5 hover:bg-white/10 border border-cyan-500/20 text-gray-300 hover:text-white transition-all cursor-pointer"
-          title="Pipeline Settings"
-        >
-          <Settings className="w-4 h-4" />
-        </button>
+        {/* System online */}
+        <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-emerald-950/40 border border-emerald-500/30 text-emerald-400 text-xs font-medium">
+          <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
 
-        {/* User profile avatar */}
-        <div className="w-8 h-8 rounded-full bg-cyan-950/80 border border-cyan-400/50 flex items-center justify-center text-cyan-300 shadow-glow-cyan-sm">
-          <User className="w-4 h-4" />
+          <span className="tracking-wide">
+            System Online
+          </span>
+        </div>
+
+        {/* =================================================
+            PROFILE
+            ================================================= */}
+
+        <div
+          ref={profileRef}
+          className="relative"
+        >
+          <button
+            type="button"
+            onClick={() =>
+              setProfileOpen(
+                previous =>
+                  !previous
+              )
+            }
+            className="flex items-center gap-2 p-1.5 rounded-lg hover:bg-white/[0.06] border border-transparent hover:border-cyan-400/20 transition-all cursor-pointer"
+            title="Profile"
+          >
+            <div className="w-8 h-8 rounded-full bg-cyan-950/80 border border-cyan-400/50 flex items-center justify-center text-cyan-300 shadow-[0_0_15px_rgba(34,211,238,0.08)]">
+              <User className="w-4 h-4" />
+            </div>
+
+            <ChevronDown
+              className={`w-3.5 h-3.5 text-gray-500 transition-transform ${
+                profileOpen
+                  ? 'rotate-180'
+                  : ''
+              }`}
+            />
+          </button>
+
+          {/* =================================================
+              PROFILE DROPDOWN
+              ================================================= */}
+
+          {profileOpen && (
+            <div className="absolute right-0 top-12 w-72 rounded-xl bg-[#0b1220] border border-white/10 shadow-2xl overflow-hidden">
+
+              {/* User info */}
+              <div className="p-4 border-b border-white/10">
+
+                <div className="flex items-center gap-3">
+
+                  <div className="w-11 h-11 rounded-full bg-cyan-950/80 border border-cyan-400/40 flex items-center justify-center text-cyan-300">
+                    <UserCircle className="w-6 h-6" />
+                  </div>
+
+                  <div className="min-w-0">
+                    <p className="text-sm font-semibold text-white truncate">
+                      {userName}
+                    </p>
+
+                    <p className="text-xs text-gray-500 truncate mt-0.5">
+                      {userEmail ||
+                        'No email available'}
+                    </p>
+                  </div>
+
+                </div>
+              </div>
+
+              {/* Account status */}
+              <div className="px-4 py-3">
+
+                <div className="flex items-center gap-3">
+                  <ShieldCheck className="w-4 h-4 text-emerald-400" />
+
+                  <div>
+                    <p className="text-xs text-gray-300">
+                      Email verified
+                    </p>
+
+                    <p className="text-[10px] text-gray-600 mt-0.5">
+                      Account authenticated
+                    </p>
+                  </div>
+                </div>
+
+              </div>
+
+              {/* Logout */}
+              <div className="border-t border-white/10 p-2">
+
+                <button
+                  type="button"
+                  onClick={
+                    handleLogout
+                  }
+                  className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm text-red-400 hover:bg-red-500/10 transition-all"
+                >
+                  <LogOut className="w-4 h-4" />
+
+                  <span>
+                    Logout
+                  </span>
+                </button>
+
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </header>
   );
 };
+
+export default TopHeader;
