@@ -1,0 +1,30 @@
+# Environment / secrets
+.env
+.env.*
+!.env.example
+
+# Node
+node_modules/
+
+# Python
+venv/
+__pycache__/
+*.pyc
+
+# Build output
+dist/
+
+# Local authentication data
+backend/data/auth/
+
+# Generated EEG processing data
+backend/data/processed/
+backend/data/raw/uploads/
+
+# Backup files
+*.backup
+*.backup.js
+
+# Local backup server files
+server.backup.js
+server.js.backup
