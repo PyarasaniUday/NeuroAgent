@@ -16,8 +16,23 @@ import {
 } from 'lucide-react';
 
 export const Dashboard = () => {
-  // Get the filename of whatever EEG file the user uploads
-  const { uploadedFileName } = useNeuro();
+  // Get the active EEG file info from context
+  const {
+    uploadedFileName,
+    uploadedFile,
+    subject,
+    recording,
+    channels,
+  } = useNeuro();
+
+  const currentInputFile =
+    uploadedFileName ||
+    uploadedFile?.name ||
+    `${subject}${recording}.edf`;
+
+  const fileMatch = currentInputFile.match(/^(.+?)(R\d+)\.edf$/i);
+  const activeSubject = fileMatch ? fileMatch[1].toUpperCase() : subject;
+  const activeRecording = fileMatch ? fileMatch[2].toUpperCase() : recording;
 
   const [n8nStatus, setN8nStatus] = useState('READY');
 
@@ -326,6 +341,27 @@ export const Dashboard = () => {
 
               </div>
 
+            </div>
+
+            {/* Active Input Placement Info Banner */}
+            <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 px-2.5 py-1 rounded-lg bg-cyan-950/60 border border-cyan-400/30 text-[10px] font-mono shadow-[0_0_15px_rgba(34,211,238,0.1)]">
+                <div className="flex items-center gap-1.5">
+                  <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                  <span className="text-gray-400 uppercase tracking-wider text-[9px]">Input Source:</span>
+                </div>
+                <span className="font-bold text-cyan-300 bg-cyan-500/15 px-1.5 py-0.5 rounded border border-cyan-400/20">
+                  {currentInputFile}
+                </span>
+                <span className="text-gray-600">|</span>
+                <span className="text-gray-300">
+                  Subj: <span className="text-white font-semibold">{activeSubject}</span>
+                </span>
+                <span className="text-gray-600">|</span>
+                <span className="text-gray-300">
+                  <span className="text-emerald-400 font-semibold">{channels.length}</span> Electrodes
+                </span>
+              </div>
             </div>
 
           </div>
