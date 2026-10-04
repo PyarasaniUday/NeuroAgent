@@ -30,6 +30,7 @@ const path = require('path');
 const crypto = require('crypto');
 const { spawn } = require('child_process');
 const nodemailer = require('nodemailer');
+const { createClient } = require('@supabase/supabase-js');
 
 const PORT = 3000;
 
@@ -42,24 +43,17 @@ const METADATA_DIR = path.join(DATA_DIR, 'metadata');
 // AUTHENTICATION CONFIGURATION
 // ========================================================
 
-const USERS_DIR = path.join(DATA_DIR, 'auth');
-const USERS_FILE = path.join(USERS_DIR, 'users.json');
+const FRONTEND_ORIGIN = process.env.FRONTEND_ORIGIN || 'http://localhost:5173';
 
-const FRONTEND_ORIGIN =
-  process.env.FRONTEND_ORIGIN || 'http://localhost:5173';
+const supabase = createClient(
+  process.env.SUPABASE_URL,
+  process.env.SUPABASE_SECRET_KEY
+);
 
 const OTP_EXPIRY_MS = 5 * 60 * 1000;
 const OTP_RESEND_MS = 60 * 1000;
 const SESSION_EXPIRY_MS = 24 * 60 * 60 * 1000;
 const MAX_OTP_ATTEMPTS = 5;
-
-if (!fs.existsSync(USERS_DIR)) {
-  fs.mkdirSync(USERS_DIR, { recursive: true });
-}
-
-if (!fs.existsSync(USERS_FILE)) {
-  fs.writeFileSync(USERS_FILE, '[]', 'utf8');
-}
 
 // email -> OTP record
 const otpStore = new Map();
@@ -138,57 +132,43 @@ function verifyPassword(password, storedPassword) {
   }
 }
 
-function loadUsers() {
-  try {
-    const data = fs.readFileSync(
-      USERS_FILE,
-      'utf8'
-    );
+async function findUser(email) {
+  const normalizedEmail = normalizeEmail(email);
 
-    const users = JSON.parse(data);
+  const { data, error } = await supabase
+    .from('users')
+    .select('id, name, email, password_hash, email_verified, created_at')
+    .eq('email', normalizedEmail)
+    .limit(1)
+    .maybeSingle();
 
-    return Array.isArray(users)
-      ? users
-      : [];
-  } catch (error) {
-    return [];
+  if (error) {
+    console.error('Supabase findUser error:', error.message);
+    return null;
   }
+
+  return data;
 }
 
-function saveUsers(users) {
-  fs.writeFileSync(
-    USERS_FILE,
-    JSON.stringify(users, null, 2),
-    'utf8'
-  );
-}
+async function createSupabaseUser(pendingUser) {
+  const { data, error } = await supabase
+    .from('users')
+    .insert({
+      name: pendingUser.name || 'NeuroAgent User',
+      email: normalizeEmail(pendingUser.email),
+      password_hash: pendingUser.passwordHash,
+      email_verified: true,
+      created_at: pendingUser.createdAt || new Date().toISOString(),
+    })
+    .select('id, name, email, password_hash, email_verified, created_at')
+    .single();
 
-function findUser(email) {
-  const users = loadUsers();
+  if (error) {
+    console.error('Supabase create user error:', error.message);
+    throw new Error(error.message);
+  }
 
-  return users.find(
-    user =>
-      user.email === normalizeEmail(email)
-  );
-}
-
-function createUser(name, email, password) {
-  const users = loadUsers();
-
-  const normalizedEmail =
-    normalizeEmail(email);
-
-  const user = {
-    name: String(name || '').trim(),
-    email: normalizedEmail,
-    passwordHash: hashPassword(password),
-    createdAt: new Date().toISOString(),
-  };
-
-  users.push(user);
-  saveUsers(users);
-
-  return user;
+  return data;
 }
 
 function createSession(res, email) {
@@ -238,7 +218,7 @@ function getCookie(req, name) {
   return null;
 }
 
-function getAuthenticatedUser(req) {
+async function getAuthenticatedUser(req) {
   const token =
     getCookie(req, 'session');
 
@@ -259,7 +239,7 @@ function getAuthenticatedUser(req) {
   }
 
   const user =
-    findUser(session.email);
+    await findUser(session.email);
 
   return {
     email: session.email,
@@ -815,7 +795,7 @@ const server =
             }
 
             const existingUser =
-              findUser(email);
+              await findUser(email);
 
             if (existingUser) {
               sendJSON(
@@ -932,13 +912,13 @@ const server =
               );
 
             const user =
-              findUser(email);
+              await findUser(email);
 
             if (
               !user ||
               !verifyPassword(
                 password,
-                user.passwordHash
+                user.password_hash
               )
             ) {
               sendJSON(
@@ -1009,7 +989,7 @@ const server =
 
         req.on(
           'end',
-          () => {
+          async () => {
 
             let body = {};
 
@@ -1122,7 +1102,7 @@ const server =
               'signup'
             ) {
               const existingUser =
-                findUser(email);
+                await findUser(email);
 
               if (existingUser) {
                 sendJSON(
@@ -1136,36 +1116,22 @@ const server =
                 return;
               }
 
-              const users =
-                loadUsers();
-
-              if (
-                record.pendingUser
-              ) {
-                users.push({
-                  name:
-                    record
-                      .pendingUser
-                      .name ||
-                    'NeuroAgent User',
-
-                  email:
-                    record
-                      .pendingUser
-                      .email,
-
-                  passwordHash:
-                    record
-                      .pendingUser
-                      .passwordHash,
-
-                  createdAt:
-                    record
-                      .pendingUser
-                      .createdAt,
-                });
-
-                saveUsers(users);
+              if (record.pendingUser) {
+                try {
+                  await createSupabaseUser(
+                    record.pendingUser
+                  );
+                } catch (error) {
+                  sendJSON(
+                    res,
+                    500,
+                    {
+                      error:
+                        'Unable to create your account. Please try again.',
+                    }
+                  );
+                  return;
+                }
               }
             }
 
@@ -1179,7 +1145,7 @@ const server =
             );
 
             const authenticatedUser =
-              findUser(email);
+              await findUser(email);
 
             sendJSON(
               res,
@@ -1279,7 +1245,7 @@ const server =
             if (
               purpose ===
                 'signin' &&
-              !findUser(email)
+              !(await findUser(email))
             ) {
               sendJSON(
                 res,
@@ -1337,35 +1303,40 @@ const server =
         pathname ===
           '/api/auth/status'
       ) {
-        const user =
-          getAuthenticatedUser(
-            req
-          );
-
-        if (!user) {
-          sendJSON(
-            res,
-            200,
-            {
-              authenticated:
-                false,
+        getAuthenticatedUser(req)
+          .then(user => {
+            if (!user) {
+              sendJSON(
+                res,
+                200,
+                {
+                  authenticated: false,
+                }
+              );
+              return;
             }
-          );
-          return;
-        }
 
-        sendJSON(
-          res,
-          200,
-          {
-            authenticated:
-              true,
-            email:
-              user.email,
-            name:
-              user.name,
-          }
-        );
+            sendJSON(
+              res,
+              200,
+              {
+                authenticated: true,
+                email: user.email,
+                name: user.name,
+              }
+            );
+          })
+          .catch(error => {
+            console.error('Auth status error:', error.message);
+            sendJSON(
+              res,
+              500,
+              {
+                authenticated: false,
+                error: 'Unable to check authentication status.',
+              }
+            );
+          });
 
         return;
       }
@@ -3011,10 +2982,7 @@ server.listen(
       PROCESSED_DIR
     );
 
-    console.log(
-      'Auth users:',
-      USERS_FILE
-    );
+
 
     console.log(
       'Frontend origin:',
