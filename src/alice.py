@@ -11,7 +11,7 @@ Pipeline:
     Preprocessed EEG
             ↓
         ICA sources
-            ↓
+            y
     ┌───────────────────────┐
     │ Temporal features     │
     │ Spectral features     │
@@ -30,10 +30,14 @@ pretrained model unless that model is explicitly loaded.
 
 from pathlib import Path
 
+# pyrefly: ignore [missing-import]
 import numpy as np
 import pandas as pd
+# pyrefly: ignore [missing-import]
 import mne
+# pyrefly: ignore [missing-import]
 from scipy.stats import kurtosis
+# pyrefly: ignore [missing-import]
 from scipy.signal import welch
 
 
