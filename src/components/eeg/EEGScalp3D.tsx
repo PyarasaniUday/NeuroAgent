@@ -156,7 +156,16 @@ export const EEGScalp3D: React.FC = () => {
     setIs3D,
     cameraView,
     setCameraView,
+    uploadedFileName,
+    uploadedFile,
+    subject,
+    recording,
   } = useNeuro();
+
+  const currentInputFile =
+    uploadedFileName ||
+    uploadedFile?.name ||
+    `${subject}${recording}.edf`;
 
   const [hoveredChannel, setHoveredChannel] = useState<{
     name: string;
@@ -719,10 +728,19 @@ export const EEGScalp3D: React.FC = () => {
       <div ref={containerRef} className="w-full h-full cursor-grab active:cursor-grabbing" />
 
       {/* Selected Channel Badge Pill on Scalp */}
-      <div className="absolute top-3 left-3 px-3 py-1 rounded-lg bg-black/60 border border-cyan-500/30 text-xs font-mono backdrop-blur-md z-10 flex items-center gap-2 pointer-events-none">
-        <span className="text-gray-400">Selected:</span>
-        <span className="text-cyan-300 font-bold">{selectedChannel}</span>
-        <span className="w-2 h-2 rounded-full bg-cyan-400 animate-ping" />
+      <div className="absolute top-3 left-3 flex flex-col gap-1.5 z-10 pointer-events-none">
+        <div className="px-3 py-1 rounded-lg bg-black/60 border border-cyan-500/30 text-xs font-mono backdrop-blur-md flex items-center gap-2">
+          <span className="text-gray-400">Selected:</span>
+          <span className="text-cyan-300 font-bold">{selectedChannel}</span>
+          <span className="w-2 h-2 rounded-full bg-cyan-400 animate-ping" />
+        </div>
+
+        {/* Active Input Placement Pill */}
+        <div className="px-2.5 py-0.5 rounded-md bg-black/50 border border-white/10 text-[9px] font-mono backdrop-blur-md flex items-center gap-1.5">
+          <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+          <span className="text-gray-400">Placed for:</span>
+          <span className="text-cyan-300 font-semibold">{currentInputFile}</span>
+        </div>
       </div>
 
       {/* Controls Overlay: 2D/3D & Views */}
