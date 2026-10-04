@@ -1,6 +1,6 @@
 """
 alice.py — NeuroAgent ALICE-style IC Analysis
-================================================
+
 
 Purpose:
     Analyze ICA components using temporal, spatial and
