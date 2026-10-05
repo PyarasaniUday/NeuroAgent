@@ -1,5 +1,5 @@
 """
-alice.py — NeuroAgent ALICE-style IC Analysis
+alice.py— NeuroAgent ALICE-style IC Analysis
 
 
 Purpose:
