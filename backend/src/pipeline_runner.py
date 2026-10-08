@@ -400,7 +400,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     if args.edf:
-        target_edf = Path(args.edf)
+        target_edf = Path(args.edf).resolve()
     else:
         target_edf = DATA_DIR / "raw" / "EEGc" / args.subject / f"{args.subject}{args.recording}.edf"
 

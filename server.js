@@ -15,6 +15,10 @@
  * - Temporary in-memory OTP storage
  * - Temporary in-memory sessions
  *
+ * Database:
+ * - Supabase users table
+ * - Supabase eeg_analyses table
+ *
  * NOTE:
  * EEG APIs remain unauthenticated so the existing n8n
  * NeuroAgent automation continues to work.
@@ -33,26 +37,46 @@ const nodemailer = require('nodemailer');
 const { createClient } = require('@supabase/supabase-js');
 
 const PORT = 3000;
-
 const PROJECT_ROOT = __dirname;
-const DATA_DIR = path.join(PROJECT_ROOT, 'backend', 'data');
-const PROCESSED_DIR = path.join(DATA_DIR, 'processed');
-const METADATA_DIR = path.join(DATA_DIR, 'metadata');
+
+const DATA_DIR = path.join(
+  PROJECT_ROOT,
+  'backend',
+  'data'
+);
+
+const PROCESSED_DIR = path.join(
+  DATA_DIR,
+  'processed'
+);
+
+const METADATA_DIR = path.join(
+  DATA_DIR,
+  'metadata'
+);
 
 // ========================================================
-// AUTHENTICATION CONFIGURATION
+// AUTHENTICATION / SUPABASE CONFIGURATION
 // ========================================================
 
-const FRONTEND_ORIGIN = process.env.FRONTEND_ORIGIN || 'http://localhost:5173';
+const FRONTEND_ORIGIN =
+  process.env.FRONTEND_ORIGIN ||
+  'http://localhost:5173';
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
   process.env.SUPABASE_SECRET_KEY
 );
 
-const OTP_EXPIRY_MS = 5 * 60 * 1000;
-const OTP_RESEND_MS = 60 * 1000;
-const SESSION_EXPIRY_MS = 24 * 60 * 60 * 1000;
+const OTP_EXPIRY_MS =
+  5 * 60 * 1000;
+
+const OTP_RESEND_MS =
+  60 * 1000;
+
+const SESSION_EXPIRY_MS =
+  24 * 60 * 60 * 1000;
+
 const MAX_OTP_ATTEMPTS = 5;
 
 // email -> OTP record
@@ -61,65 +85,110 @@ const otpStore = new Map();
 // sessionToken -> session record
 const sessions = new Map();
 
-// Gmail SMTP
-const transporter = nodemailer.createTransport({
-  host: process.env.SMTP_HOST || 'smtp.gmail.com',
-  port: Number(process.env.SMTP_PORT || 465),
-  secure: String(process.env.SMTP_SECURE || 'true') === 'true',
-  auth: {
-    user: process.env.SMTP_USER,
-    pass: process.env.SMTP_PASS,
-  },
-});
+// ========================================================
+// GMAIL SMTP
+// ========================================================
+
+const transporter =
+  nodemailer.createTransport({
+    host:
+      process.env.SMTP_HOST ||
+      'smtp.gmail.com',
+
+    port:
+      Number(
+        process.env.SMTP_PORT || 465
+      ),
+
+    secure:
+      String(
+        process.env.SMTP_SECURE || 'true'
+      ) === 'true',
+
+    auth: {
+      user: process.env.SMTP_USER,
+      pass: process.env.SMTP_PASS,
+    },
+  });
 
 // ========================================================
 // AUTH HELPERS
 // ========================================================
 
 function normalizeEmail(email) {
-  return String(email || '').trim().toLowerCase();
+  return String(email || '')
+    .trim()
+    .toLowerCase();
 }
 
 function isValidEmail(email) {
-  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(
+    email
+  );
 }
 
 function generateOTP() {
-  return String(crypto.randomInt(100000, 1000000));
+  return String(
+    crypto.randomInt(100000, 1000000)
+  );
 }
 
 function generateSessionToken() {
-  return crypto.randomBytes(32).toString('hex');
+  return crypto
+    .randomBytes(32)
+    .toString('hex');
 }
 
 function hashPassword(password) {
-  const salt = crypto.randomBytes(16).toString('hex');
+  const salt =
+    crypto
+      .randomBytes(16)
+      .toString('hex');
 
-  const hash = crypto
-    .scryptSync(password, salt, 64)
-    .toString('hex');
+  const hash =
+    crypto
+      .scryptSync(
+        password,
+        salt,
+        64
+      )
+      .toString('hex');
 
   return `${salt}:${hash}`;
 }
 
-function verifyPassword(password, storedPassword) {
+function verifyPassword(
+  password,
+  storedPassword
+) {
   try {
-    const parts = String(storedPassword).split(':');
+    const parts =
+      String(storedPassword)
+        .split(':');
 
     if (parts.length !== 2) {
       return false;
     }
 
     const salt = parts[0];
-    const storedHash = Buffer.from(parts[1], 'hex');
 
-    const derivedHash = crypto.scryptSync(
-      password,
-      salt,
-      64
-    );
+    const storedHash =
+      Buffer.from(
+        parts[1],
+        'hex'
+      );
 
-    if (storedHash.length !== derivedHash.length) {
+    const derivedHash =
+      crypto.scryptSync(
+        password,
+        salt,
+        64
+      );
+
+    if (
+      storedHash.length !==
+      derivedHash.length
+    ) {
       return false;
     }
 
@@ -132,54 +201,169 @@ function verifyPassword(password, storedPassword) {
   }
 }
 
-async function findUser(email) {
-  const normalizedEmail = normalizeEmail(email);
+// ========================================================
+// FIND USER FROM SUPABASE
+// ========================================================
 
-  const { data, error } = await supabase
+async function findUser(email) {
+  const normalizedEmail =
+    normalizeEmail(email);
+
+  const {
+    data,
+    error,
+  } = await supabase
     .from('users')
-    .select('id, name, email, password_hash, email_verified, created_at')
-    .eq('email', normalizedEmail)
+    .select(
+      'id, name, email, password_hash, email_verified, created_at'
+    )
+    .eq(
+      'email',
+      normalizedEmail
+    )
     .limit(1)
     .maybeSingle();
 
   if (error) {
-    console.error('Supabase findUser error:', error.message);
+    console.error(
+      'Supabase findUser error:',
+      error.message
+    );
+
     return null;
   }
 
   return data;
 }
 
-async function createSupabaseUser(pendingUser) {
-  const { data, error } = await supabase
+// ========================================================
+// CREATE USER IN SUPABASE
+// ========================================================
+
+async function createSupabaseUser(
+  pendingUser
+) {
+  const {
+    data,
+    error,
+  } = await supabase
     .from('users')
     .insert({
-      name: pendingUser.name || 'NeuroAgent User',
-      email: normalizeEmail(pendingUser.email),
-      password_hash: pendingUser.passwordHash,
+      name:
+        pendingUser.name ||
+        'NeuroAgent User',
+
+      email:
+        normalizeEmail(
+          pendingUser.email
+        ),
+
+      password_hash:
+        pendingUser.passwordHash,
+
       email_verified: true,
-      created_at: pendingUser.createdAt || new Date().toISOString(),
+
+      created_at:
+        pendingUser.createdAt ||
+        new Date().toISOString(),
     })
-    .select('id, name, email, password_hash, email_verified, created_at')
+    .select(
+      'id, name, email, password_hash, email_verified, created_at'
+    )
     .single();
 
   if (error) {
-    console.error('Supabase create user error:', error.message);
-    throw new Error(error.message);
+    console.error(
+      'Supabase create user error:',
+      error.message
+    );
+
+    throw new Error(
+      error.message
+    );
   }
 
   return data;
 }
 
-function createSession(res, email) {
+// ========================================================
+// SAVE EEG ANALYSIS TO SUPABASE
+// ========================================================
+
+async function saveEEGAnalysis({
+  userId,
+  filename,
+  subject,
+  recording,
+  status,
+  quality,
+}) {
+  const {
+    data,
+    error,
+  } = await supabase
+    .from('eeg_analyses')
+    .insert({
+      user_id:
+        userId || null,
+
+      filename:
+        filename || null,
+
+      subject:
+        subject || null,
+
+      recording:
+        recording || null,
+
+      status:
+        status || null,
+
+      quality:
+        quality || null,
+    })
+    .select()
+    .single();
+
+  if (error) {
+    console.error(
+      'Supabase eeg_analyses insert error:',
+      error.message
+    );
+
+    return null;
+  }
+
+  console.log(
+    'EEG analysis saved to Supabase:',
+    data.id
+  );
+
+  return data;
+}
+
+// ========================================================
+// SESSION HELPERS
+// ========================================================
+
+function createSession(
+  res,
+  email
+) {
   const token =
     generateSessionToken();
 
-  sessions.set(token, {
-    email: normalizeEmail(email),
-    expiresAt:
-      Date.now() + SESSION_EXPIRY_MS,
-  });
+  sessions.set(
+    token,
+    {
+      email:
+        normalizeEmail(email),
+
+      expiresAt:
+        Date.now() +
+        SESSION_EXPIRY_MS,
+    }
+  );
 
   res.setHeader(
     'Set-Cookie',
@@ -191,36 +375,64 @@ function createSession(res, email) {
   return token;
 }
 
-function getCookie(req, name) {
+function getCookie(
+  req,
+  name
+) {
   const cookieHeader =
     req.headers.cookie || '';
 
-  const cookies = cookieHeader
-    .split(';')
-    .map(part => part.trim())
-    .filter(Boolean);
+  const cookies =
+    cookieHeader
+      .split(';')
+      .map(
+        part => part.trim()
+      )
+      .filter(Boolean);
 
-  for (const cookie of cookies) {
-    const index = cookie.indexOf('=');
+  for (
+    const cookie of cookies
+  ) {
+    const index =
+      cookie.indexOf('=');
 
     if (index === -1) {
       continue;
     }
 
-    const key = cookie.slice(0, index);
-    const value = cookie.slice(index + 1);
+    const key =
+      cookie.slice(
+        0,
+        index
+      );
+
+    const value =
+      cookie.slice(
+        index + 1
+      );
 
     if (key === name) {
-      return decodeURIComponent(value);
+      return decodeURIComponent(
+        value
+      );
     }
   }
 
   return null;
 }
 
-async function getAuthenticatedUser(req) {
+// ========================================================
+// GET AUTHENTICATED USER
+// ========================================================
+
+async function getAuthenticatedUser(
+  req
+) {
   const token =
-    getCookie(req, 'session');
+    getCookie(
+      req,
+      'session'
+    );
 
   if (!token) {
     return null;
@@ -233,25 +445,41 @@ async function getAuthenticatedUser(req) {
     return null;
   }
 
-  if (Date.now() > session.expiresAt) {
+  if (
+    Date.now() >
+    session.expiresAt
+  ) {
     sessions.delete(token);
     return null;
   }
 
   const user =
-    await findUser(session.email);
+    await findUser(
+      session.email
+    );
 
   return {
-    email: session.email,
+    id:
+      user?.id || null,
+
+    email:
+      session.email,
+
     name:
       user?.name ||
       'NeuroAgent User',
   };
 }
 
-function clearSession(req, res) {
+function clearSession(
+  req,
+  res
+) {
   const token =
-    getCookie(req, 'session');
+    getCookie(
+      req,
+      'session'
+    );
 
   if (token) {
     sessions.delete(token);
@@ -267,7 +495,11 @@ function clearSession(req, res) {
 // OTP EMAIL
 // ========================================================
 
-function sendOTP(email, code, purpose) {
+function sendOTP(
+  email,
+  code,
+  purpose
+) {
   const subject =
     purpose === 'signup'
       ? 'NeuroAgent - Verify Your Account'
@@ -301,9 +533,13 @@ NeuroAgent Team
 `;
 
   return transporter.sendMail({
-    from: `"NeuroAgent" <${process.env.SMTP_USER}>`,
+    from:
+      `"NeuroAgent" <${process.env.SMTP_USER}>`,
+
     to: email,
+
     subject,
+
     text: message,
   });
 }
@@ -317,23 +553,32 @@ async function createAndSendOTP(
     normalizeEmail(email);
 
   const existing =
-    otpStore.get(normalizedEmail);
+    otpStore.get(
+      normalizedEmail
+    );
 
   if (
     existing &&
-    Date.now() - existing.createdAt <
+    Date.now() -
+      existing.createdAt <
       OTP_RESEND_MS
   ) {
-    const remaining = Math.ceil(
-      (
-        OTP_RESEND_MS -
-        (Date.now() - existing.createdAt)
-      ) / 1000
-    );
+    const remaining =
+      Math.ceil(
+        (
+          OTP_RESEND_MS -
+          (
+            Date.now() -
+            existing.createdAt
+          )
+        ) / 1000
+      );
 
     return {
       success: false,
-      error: `Please wait ${remaining} seconds before requesting another OTP.`,
+
+      error:
+        `Please wait ${remaining} seconds before requesting another OTP.`,
     };
   }
 
@@ -345,9 +590,11 @@ async function createAndSendOTP(
     {
       code,
       purpose,
-      createdAt: Date.now(),
+      createdAt:
+        Date.now(),
       expiresAt:
-        Date.now() + OTP_EXPIRY_MS,
+        Date.now() +
+        OTP_EXPIRY_MS,
       attempts: 0,
       pendingUser,
     }
@@ -356,13 +603,26 @@ async function createAndSendOTP(
   try {
     const isPlaceholder =
       !process.env.SMTP_PASS ||
-      process.env.SMTP_PASS.includes('your_16_character');
+      process.env.SMTP_PASS.includes(
+        'your_16_character'
+      );
 
     if (isPlaceholder) {
-      console.log(`\n==================================================`);
-      console.log(`🔑 [DEV MODE OTP] Email: ${normalizedEmail}`);
-      console.log(`🔑 OTP Code: ${code} (Purpose: ${purpose})`);
-      console.log(`==================================================\n`);
+      console.log(
+        '\n=================================================='
+      );
+
+      console.log(
+        `🔑 [DEV MODE OTP] Email: ${normalizedEmail}`
+      );
+
+      console.log(
+        `🔑 OTP Code: ${code} (Purpose: ${purpose})`
+      );
+
+      console.log(
+        '==================================================\n'
+      );
 
       return {
         success: true,
@@ -384,11 +644,25 @@ async function createAndSendOTP(
       error.message
     );
 
-    console.log(`\n==================================================`);
-    console.log(`⚠️ SMTP Error (${error.message}). Using DEV FALLBACK:`);
-    console.log(`🔑 [DEV MODE OTP] Email: ${normalizedEmail}`);
-    console.log(`🔑 OTP Code: ${code} (Purpose: ${purpose})`);
-    console.log(`==================================================\n`);
+    console.log(
+      '\n=================================================='
+    );
+
+    console.log(
+      `⚠️ SMTP Error (${error.message}). Using DEV FALLBACK:`
+    );
+
+    console.log(
+      `🔑 [DEV MODE OTP] Email: ${normalizedEmail}`
+    );
+
+    console.log(
+      `🔑 OTP Code: ${code} (Purpose: ${purpose})`
+    );
+
+    console.log(
+      '==================================================\n'
+    );
 
     return {
       success: true,
@@ -403,20 +677,28 @@ async function createAndSendOTP(
 const MIME = {
   '.html':
     'text/html; charset=utf-8',
+
   '.css':
     'text/css; charset=utf-8',
+
   '.js':
     'application/javascript; charset=utf-8',
+
   '.json':
     'application/json',
+
   '.png':
     'image/png',
+
   '.jpg':
     'image/jpeg',
+
   '.svg':
     'image/svg+xml',
+
   '.ico':
     'image/x-icon',
+
   '.woff2':
     'font/woff2',
 };
@@ -426,17 +708,23 @@ const MIME = {
 // ========================================================
 
 function parseCSV(text) {
-  const lines = text
-    .replace(/\r\n/g, '\n')
-    .trim()
-    .split('\n');
+  const lines =
+    text
+      .replace(
+        /\r\n/g,
+        '\n'
+      )
+      .trim()
+      .split('\n');
 
   if (lines.length < 2) {
     return [];
   }
 
   const headers =
-    splitCSVLine(lines[0]);
+    splitCSVLine(
+      lines[0]
+    );
 
   return lines
     .slice(1)
@@ -449,7 +737,8 @@ function parseCSV(text) {
       headers.forEach(
         (h, i) => {
           obj[h] =
-            vals[i] !== undefined
+            vals[i] !==
+            undefined
               ? vals[i]
               : '';
         }
@@ -459,10 +748,13 @@ function parseCSV(text) {
     });
 }
 
-function splitCSVLine(line) {
+function splitCSVLine(
+  line
+) {
   const result = [];
 
   let cur = '';
+
   let inQ = false;
 
   for (
@@ -470,7 +762,8 @@ function splitCSVLine(line) {
     i < line.length;
     i++
   ) {
-    const ch = line[i];
+    const ch =
+      line[i];
 
     if (ch === '"') {
       inQ = !inQ;
@@ -478,14 +771,19 @@ function splitCSVLine(line) {
       ch === ',' &&
       !inQ
     ) {
-      result.push(cur.trim());
+      result.push(
+        cur.trim()
+      );
+
       cur = '';
     } else {
       cur += ch;
     }
   }
 
-  result.push(cur.trim());
+  result.push(
+    cur.trim()
+  );
 
   return result;
 }
@@ -498,16 +796,22 @@ function resolveCSVPath(
   const baseMap = {
     '/api/neuroagent':
       'neuroagent.csv',
+
     '/api/iclabel':
       'iclabel.csv',
+
     '/api/fusion':
       'fusion.csv',
+
     '/api/psd':
       'psd.csv',
+
     '/api/alice':
       'alice.csv',
+
     '/api/quality':
       'quality_report.csv',
+
     '/api/features':
       'features.csv',
   };
@@ -532,7 +836,9 @@ function resolveCSVPath(
       filename
     );
 
-  if (fs.existsSync(subPath)) {
+  if (
+    fs.existsSync(subPath)
+  ) {
     return subPath;
   }
 
@@ -542,14 +848,19 @@ function resolveCSVPath(
       filename
     );
 
-  if (fs.existsSync(flatPath)) {
+  if (
+    fs.existsSync(flatPath)
+  ) {
     return flatPath;
   }
 
   return subPath;
 }
 
-function readCSVasJSON(fp, cb) {
+function readCSVasJSON(
+  fp,
+  cb
+) {
   fs.readFile(
     fp,
     'utf8',
@@ -558,7 +869,10 @@ function readCSVasJSON(fp, cb) {
         return cb(
           {
             error:
-              `File not found: ${path.basename(fp)}`,
+              `File not found: ${path.basename(
+                fp
+              )}`,
+
             path: fp,
           },
           null
@@ -573,7 +887,8 @@ function readCSVasJSON(fp, cb) {
       } catch (e) {
         cb(
           {
-            error: e.message,
+            error:
+              e.message,
           },
           null
         );
@@ -625,7 +940,6 @@ const CSV_ROUTES = {
 const server =
   http.createServer(
     (req, res) => {
-
       // ----------------------------------------------------
       // CORS
       // ----------------------------------------------------
@@ -659,7 +973,8 @@ const server =
       );
 
       if (
-        req.method === 'OPTIONS'
+        req.method ===
+        'OPTIONS'
       ) {
         res.writeHead(204);
         res.end();
@@ -695,7 +1010,6 @@ const server =
         req.on(
           'end',
           async () => {
-
             let body = {};
 
             try {
@@ -714,6 +1028,7 @@ const server =
                     'Invalid request body.',
                 }
               );
+
               return;
             }
 
@@ -749,6 +1064,7 @@ const server =
                     'Please enter your name.',
                 }
               );
+
               return;
             }
 
@@ -763,6 +1079,7 @@ const server =
                     'Name must be 50 characters or less.',
                 }
               );
+
               return;
             }
 
@@ -777,6 +1094,7 @@ const server =
                     'Please enter a valid email address.',
                 }
               );
+
               return;
             }
 
@@ -791,6 +1109,7 @@ const server =
                     'Password must contain at least 8 characters.',
                 }
               );
+
               return;
             }
 
@@ -806,11 +1125,14 @@ const server =
                     'Passwords do not match.',
                 }
               );
+
               return;
             }
 
             const existingUser =
-              await findUser(email);
+              await findUser(
+                email
+              );
 
             if (existingUser) {
               sendJSON(
@@ -821,16 +1143,19 @@ const server =
                     'An account with this email already exists.',
                 }
               );
+
               return;
             }
 
             const pendingUser = {
               name,
               email,
+
               passwordHash:
                 hashPassword(
                   password
                 ),
+
               createdAt:
                 new Date().toISOString(),
             };
@@ -853,6 +1178,7 @@ const server =
                     result.error,
                 }
               );
+
               return;
             }
 
@@ -861,9 +1187,12 @@ const server =
               200,
               {
                 success: true,
+
                 message:
                   'OTP sent successfully.',
+
                 email,
+
                 purpose:
                   'signup',
               }
@@ -894,7 +1223,6 @@ const server =
         req.on(
           'end',
           async () => {
-
             let body = {};
 
             try {
@@ -913,6 +1241,7 @@ const server =
                     'Invalid request body.',
                 }
               );
+
               return;
             }
 
@@ -927,7 +1256,9 @@ const server =
               );
 
             const user =
-              await findUser(email);
+              await findUser(
+                email
+              );
 
             if (
               !user ||
@@ -944,6 +1275,7 @@ const server =
                     'Invalid email or password.',
                 }
               );
+
               return;
             }
 
@@ -964,6 +1296,7 @@ const server =
                     result.error,
                 }
               );
+
               return;
             }
 
@@ -972,9 +1305,12 @@ const server =
               200,
               {
                 success: true,
+
                 message:
                   'OTP sent successfully.',
+
                 email,
+
                 purpose:
                   'signin',
               }
@@ -1005,7 +1341,6 @@ const server =
         req.on(
           'end',
           async () => {
-
             let body = {};
 
             try {
@@ -1024,6 +1359,7 @@ const server =
                     'Invalid request body.',
                 }
               );
+
               return;
             }
 
@@ -1049,6 +1385,7 @@ const server =
                     'No active OTP found. Please request a new OTP.',
                 }
               );
+
               return;
             }
 
@@ -1056,7 +1393,9 @@ const server =
               Date.now() >
               record.expiresAt
             ) {
-              otpStore.delete(email);
+              otpStore.delete(
+                email
+              );
 
               sendJSON(
                 res,
@@ -1066,6 +1405,7 @@ const server =
                     'OTP has expired. Please request a new OTP.',
                 }
               );
+
               return;
             }
 
@@ -1073,7 +1413,9 @@ const server =
               record.attempts >=
               MAX_OTP_ATTEMPTS
             ) {
-              otpStore.delete(email);
+              otpStore.delete(
+                email
+              );
 
               sendJSON(
                 res,
@@ -1083,11 +1425,13 @@ const server =
                     'Too many incorrect attempts. Please request a new OTP.',
                 }
               );
+
               return;
             }
 
             if (
-              otp !== record.code
+              otp !==
+              record.code
             ) {
               record.attempts++;
 
@@ -1102,11 +1446,17 @@ const server =
                     } attempts remaining.`,
                 }
               );
+
               return;
             }
 
-            // OTP correct
-            otpStore.delete(email);
+            // ==================================================
+            // OTP CORRECT
+            // ==================================================
+
+            otpStore.delete(
+              email
+            );
 
             // ------------------------------------------------
             // SIGNUP
@@ -1117,9 +1467,13 @@ const server =
               'signup'
             ) {
               const existingUser =
-                await findUser(email);
+                await findUser(
+                  email
+                );
 
-              if (existingUser) {
+              if (
+                existingUser
+              ) {
                 sendJSON(
                   res,
                   409,
@@ -1128,10 +1482,13 @@ const server =
                       'Account already exists.',
                   }
                 );
+
                 return;
               }
 
-              if (record.pendingUser) {
+              if (
+                record.pendingUser
+              ) {
                 try {
                   await createSupabaseUser(
                     record.pendingUser
@@ -1145,6 +1502,7 @@ const server =
                         'Unable to create your account. Please try again.',
                     }
                   );
+
                   return;
                 }
               }
@@ -1160,18 +1518,23 @@ const server =
             );
 
             const authenticatedUser =
-              await findUser(email);
+              await findUser(
+                email
+              );
 
             sendJSON(
               res,
               200,
               {
                 success: true,
+
                 message:
                   'OTP verified successfully.',
-                authenticated:
-                  true,
+
+                authenticated: true,
+
                 email,
+
                 name:
                   authenticatedUser?.name ||
                   'NeuroAgent User',
@@ -1203,7 +1566,6 @@ const server =
         req.on(
           'end',
           async () => {
-
             let body = {};
 
             try {
@@ -1222,6 +1584,7 @@ const server =
                     'Invalid request body.',
                 }
               );
+
               return;
             }
 
@@ -1231,7 +1594,9 @@ const server =
               );
 
             const previous =
-              otpStore.get(email);
+              otpStore.get(
+                email
+              );
 
             let purpose =
               body.purpose ||
@@ -1260,7 +1625,9 @@ const server =
             if (
               purpose ===
                 'signin' &&
-              !(await findUser(email))
+              !(await findUser(
+                email
+              ))
             ) {
               sendJSON(
                 res,
@@ -1270,6 +1637,7 @@ const server =
                     'Account not found.',
                 }
               );
+
               return;
             }
 
@@ -1291,6 +1659,7 @@ const server =
                     result.error,
                 }
               );
+
               return;
             }
 
@@ -1299,6 +1668,7 @@ const server =
               200,
               {
                 success: true,
+
                 message:
                   'A new OTP has been sent.',
               }
@@ -1318,16 +1688,20 @@ const server =
         pathname ===
           '/api/auth/status'
       ) {
-        getAuthenticatedUser(req)
+        getAuthenticatedUser(
+          req
+        )
           .then(user => {
             if (!user) {
               sendJSON(
                 res,
                 200,
                 {
-                  authenticated: false,
+                  authenticated:
+                    false,
                 }
               );
+
               return;
             }
 
@@ -1335,20 +1709,35 @@ const server =
               res,
               200,
               {
-                authenticated: true,
-                email: user.email,
-                name: user.name,
+                authenticated:
+                  true,
+
+                id:
+                  user.id,
+
+                email:
+                  user.email,
+
+                name:
+                  user.name,
               }
             );
           })
           .catch(error => {
-            console.error('Auth status error:', error.message);
+            console.error(
+              'Auth status error:',
+              error.message
+            );
+
             sendJSON(
               res,
               500,
               {
-                authenticated: false,
-                error: 'Unable to check authentication status.',
+                authenticated:
+                  false,
+
+                error:
+                  'Unable to check authentication status.',
               }
             );
           });
@@ -1473,19 +1862,17 @@ const server =
         ) {
           fs.readdirSync(
             PROCESSED_DIR
-          ).forEach(
-            item => {
-              if (
-                /^S\d{3}$/i.test(
-                  item
-                )
-              ) {
-                subjects.add(
-                  item.toUpperCase()
-                );
-              }
+          ).forEach(item => {
+            if (
+              /^S\d{3}$/i.test(
+                item
+              )
+            ) {
+              subjects.add(
+                item.toUpperCase()
+              );
             }
-          );
+          });
         }
 
         subjects.add('S002');
@@ -1522,24 +1909,24 @@ const server =
           );
 
         if (
-          fs.existsSync(subjDir)
+          fs.existsSync(
+            subjDir
+          )
         ) {
           fs.readdirSync(
             subjDir
-          ).forEach(
-            f => {
-              const m =
-                f.match(
-                  /R\d{2}/i
-                );
+          ).forEach(f => {
+            const m =
+              f.match(
+                /R\d{2}/i
+              );
 
-              if (m) {
-                recs.add(
-                  m[0].toUpperCase()
-                );
-              }
+            if (m) {
+              recs.add(
+                m[0].toUpperCase()
+              );
             }
-          );
+          });
         }
 
         if (
@@ -1553,6 +1940,7 @@ const server =
           200,
           {
             subject,
+
             recordings:
               Array.from(
                 recs
@@ -1702,13 +2090,16 @@ const server =
                 res,
                 200,
                 {
-                  success:
-                    true,
+                  success: true,
+
                   filename,
+
                   filePath:
                     targetPath,
+
                   subject:
                     subj,
+
                   recording:
                     rec,
                 }
@@ -1850,13 +2241,16 @@ const server =
               res,
               200,
               {
-                success:
-                  true,
+                success: true,
+
                 filename,
+
                 filePath:
                   targetPath,
+
                 subject:
                   subj,
+
                 recording:
                   rec,
               }
@@ -1886,7 +2280,34 @@ const server =
 
         req.on(
           'end',
-          () => {
+          async () => {
+            // ------------------------------------------------
+            // Check logged-in browser session if available.
+            //
+            // n8n does not currently forward the browser
+            // session cookie, so n8n requests will have
+            // userId = null.
+            // ------------------------------------------------
+
+            let authenticatedUser =
+              null;
+
+            try {
+              authenticatedUser =
+                await getAuthenticatedUser(
+                  req
+                );
+            } catch (error) {
+              console.error(
+                'Unable to get authenticated user for analysis:',
+                error.message
+              );
+            }
+
+            const userId =
+              authenticatedUser?.id ||
+              null;
+
             let body = {};
 
             try {
@@ -1929,6 +2350,10 @@ const server =
                 m[2].toUpperCase();
             }
 
+            // ------------------------------------------------
+            // Find EDF
+            // ------------------------------------------------
+
             let edfPath =
               path.join(
                 DATA_DIR,
@@ -1967,6 +2392,10 @@ const server =
                 );
             }
 
+            // ------------------------------------------------
+            // Python pipeline
+            // ------------------------------------------------
+
             const pyRunner =
               path.join(
                 PROJECT_ROOT,
@@ -1977,8 +2406,10 @@ const server =
 
             const pyArgs = [
               pyRunner,
+
               '--subject',
               subj,
+
               '--recording',
               rec,
             ];
@@ -2026,6 +2457,9 @@ const server =
             py.on(
               'close',
               code => {
+                // ------------------------------------------------
+                // Get session information
+                // ------------------------------------------------
 
                 const helperPath =
                   path.join(
@@ -2038,10 +2472,13 @@ const server =
                     'python',
                     [
                       helperPath,
+
                       '--subject',
                       subj,
+
                       '--recording',
                       rec,
+
                       '--file',
                       'session',
                     ]
@@ -2058,8 +2495,7 @@ const server =
 
                 sessPy.on(
                   'close',
-                  () => {
-
+                  async () => {
                     let sessionData =
                       null;
 
@@ -2068,7 +2504,9 @@ const server =
                         JSON.parse(
                           sOut
                         );
-                    } catch (e) {}
+                    } catch (e) {
+                      // Ignore invalid helper output.
+                    }
 
                     if (
                       !sessionData
@@ -2076,20 +2514,106 @@ const server =
                       sessionData = {
                         session_id:
                           `${subj}${rec}`,
+
                         subject:
                           subj,
+
                         recording:
                           filename,
+
                         channels:
                           64,
+
                         sampling_rate:
                           160,
+
                         duration:
                           60.99,
+
                         ica_components:
                           63,
                       };
                     }
+
+                    // ------------------------------------------------
+                    // Determine analysis status
+                    // ------------------------------------------------
+
+                    const pipelineStatus =
+                      code === 0
+                        ? 'SUCCESS'
+                        : 'FAILED';
+
+                    // ------------------------------------------------
+                    // Determine quality
+                    // ------------------------------------------------
+
+                    let quality =
+                      null;
+
+                    if (
+                      sessionData
+                    ) {
+                      quality =
+                        sessionData.quality ||
+                        sessionData.quality_status ||
+                        null;
+                    }
+
+                    // ------------------------------------------------
+                    // Parse final pipeline JSON line
+                    // ------------------------------------------------
+
+                    let pipelineResult =
+                      null;
+
+                    const pipelineOutput =
+                      out
+                        .trim()
+                        .split('\n')
+                        .pop();
+
+                    try {
+                      pipelineResult =
+                        JSON.parse(
+                          pipelineOutput
+                        );
+
+                      if (!quality) {
+                        quality =
+                          pipelineResult?.quality ||
+                          pipelineResult?.quality_status ||
+                          null;
+                      }
+                    } catch (e) {
+                      // Pipeline output may not be JSON.
+                    }
+
+                    // ------------------------------------------------
+                    // SAVE ANALYSIS TO SUPABASE
+                    // ------------------------------------------------
+
+                    const savedAnalysis =
+                      await saveEEGAnalysis({
+                        userId,
+
+                        filename,
+
+                        subject:
+                          subj,
+
+                        recording:
+                          rec,
+
+                        status:
+                          pipelineStatus,
+
+                        quality,
+                      });
+
+                    // ------------------------------------------------
+                    // Existing n8n-compatible response
+                    // ------------------------------------------------
 
                     sendJSON(
                       res,
@@ -2097,20 +2621,24 @@ const server =
                       {
                         success:
                           code === 0,
+
                         subject:
                           subj,
+
                         recording:
                           rec,
+
                         filename,
+
                         session:
                           sessionData,
+
                         pipeline_output:
-                          out
-                            .trim()
-                            .split(
-                              '\n'
-                            )
-                            .pop(),
+                          pipelineOutput,
+
+                        analysis_id:
+                          savedAnalysis?.id ||
+                          null,
                       }
                     );
                   }
@@ -2203,10 +2731,13 @@ const server =
             'python',
             [
               helperPath,
+
               '--subject',
               subject,
+
               '--recording',
               recording,
+
               '--file',
               'session',
             ]
@@ -2224,7 +2755,6 @@ const server =
         py.on(
           'close',
           code => {
-
             if (code === 0) {
               try {
                 const parsed =
@@ -2242,7 +2772,9 @@ const server =
                 );
 
                 return;
-              } catch (e) {}
+              } catch (e) {
+                // Fall through to fallback response.
+              }
             }
 
             sendJSON(
@@ -2251,17 +2783,24 @@ const server =
               {
                 session_id:
                   prefix,
+
                 subject,
+
                 recording:
                   `${prefix}.edf`,
+
                 channels:
                   64,
+
                 sampling_rate:
                   160,
+
                 duration:
                   60.99,
+
                 ica_components:
                   63,
+
                 files,
               }
             );
@@ -2455,12 +2994,16 @@ const server =
             'python',
             [
               helperPath,
+
               '--subject',
               subject,
+
               '--recording',
               recording,
+
               '--file',
               'topomap',
+
               '--component',
               comp,
             ]
@@ -2493,6 +3036,7 @@ const server =
                 {
                   error:
                     'Topomap helper failed',
+
                   details:
                     err,
                 }
@@ -2502,7 +3046,9 @@ const server =
                 sendJSON(
                   res,
                   200,
-                  JSON.parse(out)
+                  JSON.parse(
+                    out
+                  )
                 );
               } catch (e) {
                 sendJSON(
@@ -2511,6 +3057,7 @@ const server =
                   {
                     error:
                       'Invalid JSON from topomap helper',
+
                     raw:
                       out.slice(
                         0,
@@ -2555,14 +3102,19 @@ const server =
             'python',
             [
               helperPath,
+
               '--subject',
               subject,
+
               '--recording',
               recording,
+
               '--file',
               'compare',
+
               '--channel',
               channel,
+
               '--samples',
               samples,
             ]
@@ -2595,6 +3147,7 @@ const server =
                 {
                   error:
                     'Channel compare helper failed',
+
                   details:
                     err,
                 }
@@ -2604,7 +3157,9 @@ const server =
                 sendJSON(
                   res,
                   200,
-                  JSON.parse(out)
+                  JSON.parse(
+                    out
+                  )
                 );
               } catch (e) {
                 sendJSON(
@@ -2613,6 +3168,7 @@ const server =
                   {
                     error:
                       'Invalid JSON from compare helper',
+
                     raw:
                       out.slice(
                         0,
@@ -2647,10 +3203,13 @@ const server =
             'python',
             [
               helperPath,
+
               '--subject',
               subject,
+
               '--recording',
               recording,
+
               '--file',
               'channels',
             ]
@@ -2683,6 +3242,7 @@ const server =
                 {
                   error:
                     'Channels helper failed',
+
                   details:
                     err,
                 }
@@ -2692,7 +3252,9 @@ const server =
                 sendJSON(
                   res,
                   200,
-                  JSON.parse(out)
+                  JSON.parse(
+                    out
+                  )
                 );
               } catch (e) {
                 sendJSON(
@@ -2701,6 +3263,7 @@ const server =
                   {
                     error:
                       'Invalid JSON from channels helper',
+
                     raw:
                       out.slice(
                         0,
@@ -2741,6 +3304,7 @@ const server =
             {
               error:
                 'api_helper.py not found',
+
               available:
                 false,
             }
@@ -2781,16 +3345,22 @@ const server =
             'python',
             [
               helperPath,
+
               '--subject',
               subject,
+
               '--recording',
               recording,
+
               '--file',
               fileType,
+
               '--component',
               component,
+
               '--samples',
               samples,
+
               '--channels',
               channels,
             ]
@@ -2823,6 +3393,7 @@ const server =
                 {
                   error:
                     'Python helper failed',
+
                   details:
                     err,
                 }
@@ -2832,7 +3403,9 @@ const server =
                 sendJSON(
                   res,
                   200,
-                  JSON.parse(out)
+                  JSON.parse(
+                    out
+                  )
                 );
               } catch (e) {
                 sendJSON(
@@ -2841,6 +3414,7 @@ const server =
                   {
                     error:
                       'Invalid JSON from helper',
+
                     raw:
                       out.slice(
                         0,
@@ -2972,7 +3546,7 @@ server.listen(
     );
 
     console.log(
-      '║          NEUROAGENT  v1.0.0              ║'
+      '║          NEUROAGENT v1.0.0              ║'
     );
 
     console.log(
@@ -2980,7 +3554,7 @@ server.listen(
     );
 
     console.log(
-      '║    Agentic EEG Intelligence Dashboard    ║'
+      '║    Agentic EEG Intelligence Dashboard   ║'
     );
 
     console.log(
@@ -2996,8 +3570,6 @@ server.listen(
       'Backend data:',
       PROCESSED_DIR
     );
-
-
 
     console.log(
       'Frontend origin:',
