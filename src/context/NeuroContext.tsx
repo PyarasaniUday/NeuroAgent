@@ -156,6 +156,7 @@ export const NeuroProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         const upRes = await fetch('/api/upload', {
           method: 'POST',
           headers: { 'x-filename': encodeURIComponent(file.name) },
+          credentials: 'include',
           body: file,
         });
         if (upRes.ok) {
@@ -171,6 +172,7 @@ export const NeuroProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       const runRes = await fetch('/api/run-analysis', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
         body: JSON.stringify({
           filename,
           subject: targetSubj,

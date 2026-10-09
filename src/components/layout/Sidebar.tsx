@@ -9,6 +9,7 @@ import {
   ShieldCheck,
   FileText,
   Download,
+  History,
 } from 'lucide-react';
 
 interface NavItem {
@@ -26,6 +27,7 @@ const NAV_ITEMS: NavItem[] = [
   { id: 'quality', label: 'Quality Check', icon: ShieldCheck },
   { id: 'reports', label: 'Reports', icon: FileText },
   { id: 'export', label: 'Export', icon: Download },
+  { id: 'history', label: 'History', icon: History },
 ];
 
 export const Sidebar: React.FC = () => {

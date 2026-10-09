@@ -16,6 +16,7 @@ import { QualityCheck } from './pages/QualityCheck';
 import { Visualization } from './pages/Visualization';
 import { Reports } from './pages/Reports';
 import { Export } from './pages/Export';
+import { History } from './pages/History';
 
 import { SignIn } from './pages/SignIn';
 import { SignUp } from './pages/SignUp';
@@ -144,6 +145,9 @@ export const App: React.FC = () => {
 
       case 'export':
         return <Export />;
+
+      case 'history':
+        return <History />;
 
       default:
         return <Dashboard />;
