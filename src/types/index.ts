@@ -108,3 +108,25 @@ export interface WorkflowStep {
   status: 'completed' | 'in_progress' | 'pending';
   path: string;
 }
+
+export interface HistoryRecord {
+  id: string;
+  filename: string;
+  filesize: string;
+  subject: string;
+  recording: string;
+  uploadedAt: string;
+  analyzedAt?: string;
+  status: 'Cleaned' | 'Analyzed' | 'Ready' | 'Processing';
+  channels: number;
+  samplingRate: number;
+  duration: number;
+  artifactsDetected: number;
+  noiseReduction: number;
+  qualityScore: number;
+  qualityStatus: string;
+  cleanRms?: number;
+  rawRms?: number;
+  flaggedComponents?: string[];
+  summary?: string;
+}

@@ -1,0 +1,29 @@
+[
+  {
+    "id": "hist_S001R04_1791549292344",
+    "userEmail": "udaypyarasani021@gmail.com",
+    "filename": "S001R04.edf",
+    "filesize": "2.48 MB",
+    "subject": "S001",
+    "recording": "R04",
+    "uploadedAt": "2026-10-09T12:34:52.344Z",
+    "analyzedAt": "2026-10-09T12:34:52.344Z",
+    "status": "Cleaned",
+    "channels": 64,
+    "samplingRate": 160,
+    "duration": 124.99,
+    "artifactsDetected": 1,
+    "noiseReduction": 0,
+    "qualityScore": 90,
+    "qualityStatus": "GOOD",
+    "cleanRms": 25.5,
+    "rawRms": 25.5,
+    "flaggedComponents": [
+      "IC1 (Eye blink)",
+      "IC3 (Eye blink)",
+      "IC6 (Other)",
+      "IC10 (Brain)"
+    ],
+    "summary": "Clinical 64-channel EEG recording for S001 R04. 1 artifact components detected and reconstructed using 1D-CNN and Infomax ICA."
+  }
+]
